@@ -438,7 +438,7 @@ async function updateLeaderboard(discordClient, currentConfig) {
 
 
           return {
-            name: `${rank}  ${safeName}`,
+            name: '\u200B',
             value: value,
             inline: false
           };
