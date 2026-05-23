@@ -7,7 +7,22 @@ jobs:
     steps:
       - name: Send payload
         run: |
-          payload=$(cat "$GITHUB_EVENT_PATH")
+          payload=$(jq -c '{
+            ref,
+            repository: { full_name: .repository.full_name },
+            pusher: { name: .pusher.name },
+            commits: [(.commits[] | {
+              id,
+              message,
+              timestamp,
+              url,
+              added,
+              removed,
+              modified,
+              distinct,
+              author: { name: .author.name, username: .author.username }
+            })]
+          }' "$GITHUB_EVENT_PATH")
           signature=$(printf "%s" "$payload" | openssl dgst -sha256 -hmac "${{ secrets._GITHUB_WEBHOOK_SECRET }}" | sed 's/^.* //')
           echo "Payload: $payload"
           echo "Signature: $signature"
