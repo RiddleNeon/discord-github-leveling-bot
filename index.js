@@ -63,11 +63,13 @@ function formatIsoDate(value) {
   return date.toISOString();
 }
 
-function renderProgressBar(current, total, size = 16) {
+function renderProgressBar(current, total, size = 12) {
   const safeTotal = Math.max(1, total || 0);
   const ratio = Math.min(1, Math.max(0, current / safeTotal));
+
   const filled = Math.round(ratio * size);
-  return `[${'#'.repeat(filled)}${'-'.repeat(size - filled)}]`;
+
+  return `▰`.repeat(filled) + `▱`.repeat(size - filled);
 }
 
 function buildLeaderboardComponents() {
@@ -381,27 +383,59 @@ async function updateLeaderboard(discordClient, currentConfig) {
       return { ...entry, displayName, nextXp, bar, percent };
     })
   );
-
+  
   const embed = new EmbedBuilder()
-    .setTitle('Leaderboard')
-    .setColor(resolvedEntries[0] ? hashColor(resolvedEntries[0].id) : 0x2b2d31)
-    .setTimestamp(new Date());
+      .setTitle('🏆 Server Leaderboard')
+      .setDescription('Top contributors ranked by XP')
+      .setColor(0xf1c40f)
+      .setThumbnail(discordClient.user.displayAvatarURL())
+      .setFooter({
+        text: 'Level System'
+      })
+      .setTimestamp(); 
 
   if (!resolvedEntries.length) {
     embed.setDescription('No activity yet.');
   } else {
     embed.setDescription('Top 10 contributors, ranked by level and XP.');
+    const medals = ['🥇', '🥈', '🥉'];
+
     embed.addFields(
-      resolvedEntries.map((entry, index) => {
-        const rankLabel = String(index + 1).padStart(2, '0');
-        const levelLabel = String(entry.level).padStart(2, '0');
-        const safeName = clampText(entry.displayName, 32);
-        return {
-          name: `${rankLabel} | @${safeName}`,
-          value: `Level ${levelLabel} • ${entry.xp}/${entry.nextXp} XP • ${entry.percent}%\n${entry.bar}`,
-          inline: false
-        };
-      })
+        resolvedEntries.map((entry, index) => {
+          const safeName = clampText(entry.displayName, 24);
+
+          const rank =
+              medals[index] ||
+              `#${index + 1}`;
+
+          let value;
+          if (index === 0) {
+            value =
+                [
+                  '👑 **CURRENT LEADER** 👑',
+                  '',
+                  `⭐ **Level ${entry.level}**`,
+                  '',
+                  `${entry.bar}`,
+                  `\`${entry.xp} / ${entry.nextXp} XP\``
+                ].join('\n')
+          } else {
+            value =
+                [
+                  `⭐ **Level ${entry.level}**`,
+                  ``,
+                  `${entry.bar}`,
+                  `\`${entry.xp} / ${entry.nextXp} XP\` • **${entry.percent}%**`
+                ].join('\n');
+          }
+
+
+          return {
+            name: `${rank}  ${safeName}`,
+            value: value,
+            inline: false
+          };
+        })
     );
   }
 
@@ -477,7 +511,7 @@ async function processCommit(commit, payload, repo, branch) {
   if (commit.distinct === false) extras.push('Non-distinct (possible rebase)');
 
   const summaryLines = [
-    `Author: ${authorDisplay}`,
+    `Author: ${authorDisplay}    `,
     `Branch: ${branch || 'unknown'}`,
     `Hash: ${commit.id?.substring(0, 8) || 'unknown'}`,
     `Date: ${formatIsoDate(safeCommitDate)}`
