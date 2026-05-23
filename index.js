@@ -191,18 +191,28 @@ async function registerCommands() {
     return;
   }
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+  const commandScope = (process.env.COMMAND_SCOPE || (process.env.GUILD_ID ? 'guild' : 'global')).toLowerCase();
   try {
-    if (process.env.GUILD_ID) {
+    if (commandScope === 'guild') {
       // Remove global commands to avoid duplicates when using guild-scoped commands.
       await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: [] });
+      if (!process.env.GUILD_ID) {
+        console.warn('COMMAND_SCOPE=guild but GUILD_ID is missing; skipping registration.');
+        return;
+      }
       await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID), {
         body: slashCommands
       });
       console.log('Registered guild slash commands.');
-    } else {
-      await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: slashCommands });
-      console.log('Registered global slash commands.');
+      return;
     }
+
+    if (process.env.GUILD_ID) {
+      // Remove guild commands to avoid duplicates when using global commands.
+      await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID), { body: [] });
+    }
+    await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: slashCommands });
+    console.log('Registered global slash commands.');
   } catch (error) {
     console.error('Failed to register slash commands:', error);
   }
@@ -413,7 +423,7 @@ async function updateLeaderboard(discordClient, currentConfig) {
             value =
                 [
                   '👑 **CURRENT LEADER** 👑',
-                  `## ${rank}  ${safeName}`,
+                  `  ${rank}  ${safeName}`,
                   '',
                   `⭐ **Level ${entry.level}**`,
                   '',
@@ -425,7 +435,7 @@ async function updateLeaderboard(discordClient, currentConfig) {
           } else {
             value =
                 [
-                  `## ${rank}  ${safeName}`,
+                  `  ${rank}  ${safeName}`,
                   '',
                   `⭐ **Level ${entry.level}**`,
                   '',
