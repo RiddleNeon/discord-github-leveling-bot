@@ -3,7 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
 const fetch = require('node-fetch');
-const { Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField, REST, Routes } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField, REST, Routes, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 require('dotenv').config();
 
 const DATA_DIR = path.join(__dirname, 'data');
@@ -17,6 +17,8 @@ const DEFAULT_CONFIG = {
   discordToGithub: {},
   users: {}
 };
+
+const LEADERBOARD_REFRESH_ID = 'leaderboard:refresh';
 
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -179,6 +181,15 @@ client.once('ready', () => {
 });
 
 client.on('interactionCreate', async (interaction) => {
+  if (interaction.isButton()) {
+    if (interaction.customId === LEADERBOARD_REFRESH_ID) {
+      await interaction.deferReply({ ephemeral: true });
+      await updateLeaderboard(client, config);
+      await interaction.editReply('Leaderboard updated.');
+    }
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) return;
 
   if (interaction.commandName === 'ping') {
@@ -187,19 +198,22 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   if (interaction.commandName === 'help') {
-    await interaction.reply({
-      content: [
-        'Commands:',
-        '/setcommitschannel #channel (admin)',
-        '/setleaderboardchannel #channel (admin)',
-        '/addxp @user <amount> (admin)',
-        '/debugconfig (admin)',
-        '/linkgithub <githubUsername>',
-        '/unlinkgithub',
-        '/leaderboard'
-      ].join('\n'),
-      ephemeral: true
-    });
+    const embed = new EmbedBuilder()
+      .setTitle('Command Guide')
+      .setDescription(
+        [
+          '`/setcommitschannel #channel` (admin)',
+          '`/setleaderboardchannel #channel` (admin)',
+          '`/addxp @user <amount>` (admin)',
+          '`/debugconfig` (admin)',
+          '`/linkgithub <githubUsername>`',
+          '`/unlinkgithub`',
+          '`/leaderboard`'
+        ].join('\n')
+      )
+      .setColor(0x5865f2);
+
+    await interaction.reply({ embeds: [embed], ephemeral: true });
     return;
   }
 
@@ -294,7 +308,11 @@ client.on('interactionCreate', async (interaction) => {
       linkedUsers: Object.keys(config.discordToGithub).length,
       trackedUsers: Object.keys(config.users).length
     };
-    await interaction.reply({ content: `Config: ${JSON.stringify(debugInfo)}`, ephemeral: true });
+    const embed = new EmbedBuilder()
+      .setTitle('Config Snapshot')
+      .setColor(0x2b2d31)
+      .setDescription(`\`\`\`json\n${JSON.stringify(debugInfo, null, 2)}\n\`\`\``);
+    await interaction.reply({ embeds: [embed], ephemeral: true });
   }
 });
 
@@ -313,28 +331,41 @@ async function updateLeaderboard(discordClient, currentConfig) {
     })
     .slice(0, 10);
 
-  const lines = entries.length
-    ? entries.map((entry, index) => {
-      const nextXp = getXpToNext(entry.level);
-      return `${index + 1}. <@${entry.id}> - Level ${entry.level} (${entry.xp}/${nextXp} XP)`;
-    })
-    : ['No activity yet.'];
-
   const embed = new EmbedBuilder()
     .setTitle('Leaderboard')
-    .setDescription(lines.join('\n'))
     .setColor(0x2b2d31)
     .setTimestamp(new Date());
+
+  if (!entries.length) {
+    embed.setDescription('No activity yet.');
+  } else {
+    embed.setDescription('Top 10 contributors, ranked by level and XP.');
+    embed.addFields(
+      entries.map((entry, index) => {
+        const nextXp = getXpToNext(entry.level);
+        const bar = renderProgressBar(entry.xp, nextXp, 18);
+        const rankLabel = String(index + 1).padStart(2, '0');
+        const levelLabel = String(entry.level).padStart(2, '0');
+        return {
+          name: `${rankLabel} | <@${entry.id}>`,
+          value: `Level ${levelLabel} • ${entry.xp}/${nextXp} XP\n\`\`\`\n${bar}\n\`\`\``,
+          inline: false
+        };
+      })
+    );
+  }
+
+  const components = buildLeaderboardComponents();
 
   if (currentConfig.leaderboardMessageId) {
     const existing = await channel.messages.fetch(currentConfig.leaderboardMessageId).catch(() => null);
     if (existing) {
-      await existing.edit({ embeds: [embed] });
+      await existing.edit({ embeds: [embed], components });
       return;
     }
   }
 
-  const message = await channel.send({ embeds: [embed] });
+  const message = await channel.send({ embeds: [embed], components });
   currentConfig.leaderboardMessageId = message.id;
   saveConfig(currentConfig);
 }
@@ -412,11 +443,11 @@ async function processCommit(commit, payload, repo, branch) {
     .setTitle(clampText(title, 256))
     .setURL(details?.html_url || commit.url)
     .setColor(hashColor(githubUser))
-    .setDescription(body ? clampText(body, 1024) : 'No description provided.')
+    .setDescription(body ? clampText(body, 1024) : null)
     .addFields(
-      { name: 'Summary', value: clampText(summaryLines, 1024), inline: true },
-      { name: 'Changes', value: clampText(changeLines, 1024), inline: true },
-      { name: 'Top Files', value: clampText(topFiles.join('\n') || 'N/A', 1024) }
+      { name: 'Summary', value: `\`\`\`\n${clampText(summaryLines, 1024)}\n\`\`\``, inline: true },
+      { name: 'Changes', value: `\`\`\`\n${clampText(changeLines, 1024)}\n\`\`\``, inline: true },
+      { name: 'Top Files', value: `\`\`\`\n${clampText(topFiles.join('\n') || 'N/A', 1024)}\n\`\`\`` }
     )
     .setFooter({ text: payload.repository?.full_name || 'GitHub' })
     .setTimestamp(safeCommitDate);
@@ -440,6 +471,7 @@ async function processCommit(commit, payload, repo, branch) {
     await updateLeaderboard(client, config);
   }
 }
+
 
 function verifySignature(req) {
   const secret = process.env._GITHUB_WEBHOOK_SECRET;
