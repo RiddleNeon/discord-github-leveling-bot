@@ -11,7 +11,7 @@ jobs:
           signature=$(printf "%s" "$payload" | openssl dgst -sha256 -hmac "${{ secrets._GITHUB_WEBHOOK_SECRET }}" | sed 's/^.* //')
           echo "Payload: $payload"
           echo "Signature: $signature"
-          curl -X POST \
+          curl -4 -X POST \
             --silent --show-error --fail-with-body \
             --connect-timeout 5 --max-time 15 \
             --retry 3 --retry-all-errors --retry-delay 2 \
