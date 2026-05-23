@@ -355,24 +355,33 @@ async function updateLeaderboard(discordClient, currentConfig) {
     })
     .slice(0, 10);
 
+  const resolvedEntries = await Promise.all(
+    entries.map(async (entry) => {
+      const displayName = await resolveDisplayName(discordClient, channel, entry.id);
+      const nextXp = getXpToNext(entry.level);
+      const bar = renderProgressBar(entry.xp, nextXp, 18);
+      const percent = Math.round((entry.xp / Math.max(1, nextXp)) * 100);
+      return { ...entry, displayName, nextXp, bar, percent };
+    })
+  );
+
   const embed = new EmbedBuilder()
     .setTitle('Leaderboard')
-    .setColor(0x2b2d31)
+    .setColor(resolvedEntries[0] ? hashColor(resolvedEntries[0].id) : 0x2b2d31)
     .setTimestamp(new Date());
 
-  if (!entries.length) {
+  if (!resolvedEntries.length) {
     embed.setDescription('No activity yet.');
   } else {
     embed.setDescription('Top 10 contributors, ranked by level and XP.');
     embed.addFields(
-      entries.map((entry, index) => {
-        const nextXp = getXpToNext(entry.level);
-        const bar = renderProgressBar(entry.xp, nextXp, 18);
+      resolvedEntries.map((entry, index) => {
         const rankLabel = String(index + 1).padStart(2, '0');
         const levelLabel = String(entry.level).padStart(2, '0');
+        const safeName = clampText(entry.displayName, 32);
         return {
-          name: `${rankLabel} | <@${entry.id}>`,
-          value: `Level ${levelLabel} • ${entry.xp}/${nextXp} XP\n\`\`\`\n${bar}\n\`\`\``,
+          name: `${rankLabel} | @${safeName}`,
+          value: `Level ${levelLabel} • ${entry.xp}/${entry.nextXp} XP • ${entry.percent}%\n${entry.bar}`,
           inline: false
         };
       })
@@ -469,9 +478,9 @@ async function processCommit(commit, payload, repo, branch) {
     .setColor(hashColor(githubUser))
     .setDescription(body ? clampText(body, 1024) : null)
     .addFields(
-      { name: 'Summary', value: `\`\`\`\n${clampText(summaryLines, 1024)}\n\`\`\``, inline: true },
-      { name: 'Changes', value: `\`\`\`\n${clampText(changeLines, 1024)}\n\`\`\``, inline: true },
-      { name: 'Top Files', value: `\`\`\`\n${clampText(topFiles.join('\n') || 'N/A', 1024)}\n\`\`\`` }
+      { name: 'Summary', value: clampText(summaryLines, 1024).split('\n').map((line) => `- ${line}`).join('\n'), inline: true },
+      { name: 'Changes', value: clampText(changeLines, 1024).split('\n').map((line) => `- ${line}`).join('\n'), inline: true },
+      { name: 'Top Files', value: clampText(topFiles.join('\n') || 'N/A', 1024).split('\n').map((line) => `- ${line}`).join('\n') }
     )
     .setFooter({ text: payload.repository?.full_name || 'GitHub' })
     .setTimestamp(safeCommitDate);
