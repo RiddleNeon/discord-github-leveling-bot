@@ -63,6 +63,28 @@ function formatIsoDate(value) {
   return date.toISOString();
 }
 
+function renderProgressBar(current, total, size = 16) {
+  const safeTotal = Math.max(1, total || 0);
+  const ratio = Math.min(1, Math.max(0, current / safeTotal));
+  const filled = Math.round(ratio * size);
+  return `[${'#'.repeat(filled)}${'-'.repeat(size - filled)}]`;
+}
+
+function buildLeaderboardComponents() {
+  const refreshButton = new ButtonBuilder()
+    .setCustomId(LEADERBOARD_REFRESH_ID)
+    .setLabel('Refresh')
+    .setStyle(ButtonStyle.Primary);
+
+  const infoButton = new ButtonBuilder()
+    .setCustomId('leaderboard:info')
+    .setLabel('Top 10')
+    .setStyle(ButtonStyle.Secondary)
+    .setDisabled(true);
+
+  return [new ActionRowBuilder().addComponents(refreshButton, infoButton)];
+}
+
 function getXpToNext(level) {
   return Math.max(50, Math.floor(100 * Math.pow(level, 1.45)));
 }
@@ -152,6 +174,8 @@ async function registerCommands() {
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
   try {
     if (process.env.GUILD_ID) {
+      // Remove global commands to avoid duplicates when using guild-scoped commands.
+      await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: [] });
       await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID), {
         body: slashCommands
       });
