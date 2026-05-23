@@ -3,7 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
 const fetch = require('node-fetch');
-const { Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField, REST, Routes } = require('discord.js');
 require('dotenv').config();
 
 const DATA_DIR = path.join(__dirname, 'data');
@@ -78,16 +78,89 @@ function addXp(user, amount) {
   return gained;
 }
 
-function isAdmin(member) {
-  return member?.permissions?.has(PermissionsBitField.Flags.Administrator);
+function isAdmin(memberOrPermissions) {
+  const permissions = memberOrPermissions?.permissions ?? memberOrPermissions;
+  return permissions?.has?.(PermissionsBitField.Flags.Administrator);
 }
 
-function parseChannelId(arg) {
-  if (!arg) return null;
-  const match = arg.match(/^<#(\d+)>$/);
-  if (match) return match[1];
-  if (/^\d+$/.test(arg)) return arg;
-  return null;
+const slashCommands = [
+  { name: 'ping', description: 'Check if the bot is alive' },
+  { name: 'help', description: 'Show available commands' },
+  {
+    name: 'setcommitschannel',
+    description: 'Set the commit output channel',
+    default_member_permissions: PermissionsBitField.Flags.Administrator.toString(),
+    dm_permission: false,
+    options: [
+      {
+        name: 'channel',
+        description: 'Channel to post commits to',
+        type: 7,
+        required: true
+      }
+    ]
+  },
+  {
+    name: 'setleaderboardchannel',
+    description: 'Set the leaderboard channel',
+    default_member_permissions: PermissionsBitField.Flags.Administrator.toString(),
+    dm_permission: false,
+    options: [
+      {
+        name: 'channel',
+        description: 'Channel to post the leaderboard in',
+        type: 7,
+        required: true
+      }
+    ]
+  },
+  {
+    name: 'addxp',
+    description: 'Add XP to a user',
+    default_member_permissions: PermissionsBitField.Flags.Administrator.toString(),
+    dm_permission: false,
+    options: [
+      { name: 'user', description: 'User to add XP to', type: 6, required: true },
+      { name: 'amount', description: 'Amount of XP', type: 4, required: true }
+    ]
+  },
+  {
+    name: 'debugconfig',
+    description: 'Show the current config summary',
+    default_member_permissions: PermissionsBitField.Flags.Administrator.toString(),
+    dm_permission: false
+  },
+  {
+    name: 'linkgithub',
+    description: 'Link your Discord account to a GitHub username',
+    dm_permission: false,
+    options: [
+      { name: 'username', description: 'GitHub username', type: 3, required: true }
+    ]
+  },
+  { name: 'unlinkgithub', description: 'Remove your linked GitHub account', dm_permission: false },
+  { name: 'leaderboard', description: 'Refresh the leaderboard embed', dm_permission: false }
+];
+
+async function registerCommands() {
+  if (!process.env.DISCORD_TOKEN || !process.env.CLIENT_ID) {
+    console.warn('DISCORD_TOKEN or CLIENT_ID missing; skipping slash command registration.');
+    return;
+  }
+  const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+  try {
+    if (process.env.GUILD_ID) {
+      await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID), {
+        body: slashCommands
+      });
+      console.log('Registered guild slash commands.');
+    } else {
+      await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: slashCommands });
+      console.log('Registered global slash commands.');
+    }
+  } catch (error) {
+    console.error('Failed to register slash commands:', error);
+  }
 }
 
 const config = loadConfig();
@@ -102,154 +175,126 @@ const client = new Client({
 
 client.once('ready', () => {
   console.log(`Logged in as ${client.user.tag}`);
+  registerCommands();
 });
 
-client.on('messageCreate', async (message) => {
-  if (message.author.bot) return;
-  if (!message.content.startsWith(config.prefix)) return;
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
 
-  const [rawCommand, ...args] = message.content.slice(config.prefix.length).trim().split(/\s+/);
-  if (!rawCommand) return;
-  const command = rawCommand.toLowerCase();
-
-  if (command === 'ping') {
-    await message.reply('pong');
+  if (interaction.commandName === 'ping') {
+    await interaction.reply({ content: 'pong', ephemeral: true });
     return;
   }
 
-  if (command === 'help') {
-    await message.reply(
-      [
+  if (interaction.commandName === 'help') {
+    await interaction.reply({
+      content: [
         'Commands:',
-        `${config.prefix}setcommitschannel #channel (admin)`,
-        `${config.prefix}setleaderboardchannel #channel (admin)`,
-        `${config.prefix}setprefix <newPrefix> (admin)`,
-        `${config.prefix}linkgithub <githubUsername>`,
-        `${config.prefix}unlinkgithub`,
-        `${config.prefix}leaderboard`,
-        `${config.prefix}addxp @user <amount> (admin)`,
-        `${config.prefix}debugconfig (admin)`
-      ].join('\n')
-    );
+        '/setcommitschannel #channel (admin)',
+        '/setleaderboardchannel #channel (admin)',
+        '/addxp @user <amount> (admin)',
+        '/debugconfig (admin)',
+        '/linkgithub <githubUsername>',
+        '/unlinkgithub',
+        '/leaderboard'
+      ].join('\n'),
+      ephemeral: true
+    });
     return;
   }
 
-  if (command === 'setcommitschannel') {
-    if (!isAdmin(message.member)) {
-      await message.reply('Admin permissions required.');
+  if (interaction.commandName === 'setcommitschannel') {
+    if (!isAdmin(interaction.memberPermissions)) {
+      await interaction.reply({ content: 'Admin permissions required.', ephemeral: true });
       return;
     }
-    const channelId = parseChannelId(args[0]);
-    if (!channelId) {
-      await message.reply('Please mention a channel or provide a channel ID.');
+    const channel = interaction.options.getChannel('channel', true);
+    if (!channel.isTextBased()) {
+      await interaction.reply({ content: 'Please choose a text channel.', ephemeral: true });
       return;
     }
-    config.outputChannelId = channelId;
+    config.outputChannelId = channel.id;
     saveConfig(config);
-    await message.reply(`Commit output channel set to <#${channelId}>.`);
+    await interaction.reply({ content: `Commit output channel set to <#${channel.id}>.`, ephemeral: true });
     return;
   }
 
-  if (command === 'setleaderboardchannel') {
-    if (!isAdmin(message.member)) {
-      await message.reply('Admin permissions required.');
+  if (interaction.commandName === 'setleaderboardchannel') {
+    if (!isAdmin(interaction.memberPermissions)) {
+      await interaction.reply({ content: 'Admin permissions required.', ephemeral: true });
       return;
     }
-    const channelId = parseChannelId(args[0]);
-    if (!channelId) {
-      await message.reply('Please mention a channel or provide a channel ID.');
+    const channel = interaction.options.getChannel('channel', true);
+    if (!channel.isTextBased()) {
+      await interaction.reply({ content: 'Please choose a text channel.', ephemeral: true });
       return;
     }
-    config.leaderboardChannelId = channelId;
+    await interaction.deferReply({ ephemeral: true });
+    config.leaderboardChannelId = channel.id;
     config.leaderboardMessageId = '';
     saveConfig(config);
-    await message.reply(`Leaderboard channel set to <#${channelId}>.`);
     await updateLeaderboard(client, config);
+    await interaction.editReply(`Leaderboard channel set to <#${channel.id}>.`);
     return;
   }
 
-  if (command === 'setprefix') {
-    if (!isAdmin(message.member)) {
-      await message.reply('Admin permissions required.');
-      return;
-    }
-    const nextPrefix = args[0];
-    if (!nextPrefix) {
-      await message.reply('Please provide a new prefix.');
-      return;
-    }
-    config.prefix = nextPrefix;
-    saveConfig(config);
-    await message.reply(`Prefix updated to ${nextPrefix}.`);
-    return;
-  }
-
-  if (command === 'linkgithub') {
-    const githubUsername = args[0];
-    if (!githubUsername) {
-      await message.reply('Usage: linkgithub <githubUsername>');
-      return;
-    }
+  if (interaction.commandName === 'linkgithub') {
+    const githubUsername = interaction.options.getString('username', true);
     const normalized = githubUsername.toLowerCase();
-    config.discordToGithub[message.author.id] = githubUsername;
-    config.githubToDiscord[normalized] = message.author.id;
+    config.discordToGithub[interaction.user.id] = githubUsername;
+    config.githubToDiscord[normalized] = interaction.user.id;
     saveConfig(config);
-    await message.reply(`Linked ${githubUsername} to your Discord user.`);
+    await interaction.reply({ content: `Linked ${githubUsername} to your Discord user.`, ephemeral: true });
     return;
   }
 
-  if (command === 'unlinkgithub') {
-    const existing = config.discordToGithub[message.author.id];
+  if (interaction.commandName === 'unlinkgithub') {
+    const existing = config.discordToGithub[interaction.user.id];
     if (!existing) {
-      await message.reply('No GitHub account linked.');
+      await interaction.reply({ content: 'No GitHub account linked.', ephemeral: true });
       return;
     }
-    delete config.discordToGithub[message.author.id];
+    delete config.discordToGithub[interaction.user.id];
     delete config.githubToDiscord[existing.toLowerCase()];
     saveConfig(config);
-    await message.reply(`Unlinked ${existing}.`);
+    await interaction.reply({ content: `Unlinked ${existing}.`, ephemeral: true });
     return;
   }
 
-  if (command === 'leaderboard') {
+  if (interaction.commandName === 'leaderboard') {
+    await interaction.deferReply({ ephemeral: true });
     await updateLeaderboard(client, config);
-    await message.reply('Leaderboard updated.');
+    await interaction.editReply('Leaderboard updated.');
     return;
   }
 
-  if (command === 'addxp') {
-    if (!isAdmin(message.member)) {
-      await message.reply('Admin permissions required.');
+  if (interaction.commandName === 'addxp') {
+    if (!isAdmin(interaction.memberPermissions)) {
+      await interaction.reply({ content: 'Admin permissions required.', ephemeral: true });
       return;
     }
-    const userId = args[0]?.replace(/[<@!>]/g, '');
-    const amount = Number(args[1]);
-    if (!userId || Number.isNaN(amount)) {
-      await message.reply('Usage: addxp @user <amount>');
-      return;
-    }
-    config.users[userId] = config.users[userId] || { level: 1, xp: 0, totalXp: 0 };
-    const gained = addXp(config.users[userId], amount);
+    const targetUser = interaction.options.getUser('user', true);
+    const amount = interaction.options.getInteger('amount', true);
+    config.users[targetUser.id] = config.users[targetUser.id] || { level: 1, xp: 0, totalXp: 0 };
+    const gained = addXp(config.users[targetUser.id], amount);
     saveConfig(config);
     await updateLeaderboard(client, config);
-    await message.reply(`Added ${gained} XP to <@${userId}>.`);
+    await interaction.reply({ content: `Added ${gained} XP to <@${targetUser.id}>.`, ephemeral: true });
     return;
   }
 
-  if (command === 'debugconfig') {
-    if (!isAdmin(message.member)) {
-      await message.reply('Admin permissions required.');
+  if (interaction.commandName === 'debugconfig') {
+    if (!isAdmin(interaction.memberPermissions)) {
+      await interaction.reply({ content: 'Admin permissions required.', ephemeral: true });
       return;
     }
     const debugInfo = {
-      prefix: config.prefix,
       outputChannelId: config.outputChannelId,
       leaderboardChannelId: config.leaderboardChannelId,
       linkedUsers: Object.keys(config.discordToGithub).length,
       trackedUsers: Object.keys(config.users).length
     };
-    await message.reply(`Config: ${JSON.stringify(debugInfo)}`);
-    return;
+    await interaction.reply({ content: `Config: ${JSON.stringify(debugInfo)}`, ephemeral: true });
   }
 });
 
@@ -350,28 +395,34 @@ async function processCommit(commit, payload, repo, branch) {
   if (body) extras.push('Has description');
   if (commit.distinct === false) extras.push('Non-distinct (possible rebase)');
 
+  const summaryLines = [
+    `Author: ${authorDisplay}`,
+    `Branch: ${branch || 'unknown'}`,
+    `Hash: ${commit.id?.substring(0, 8) || 'unknown'}`,
+    `Date: ${formatIsoDate(safeCommitDate)}`
+  ].join('\n');
+
+  const changeLines = [
+    `Lines Added: ${added !== null ? String(added) : 'N/A'}`,
+    `Lines Removed: ${removed !== null ? String(removed) : 'N/A'}`,
+    `Files Changed: ${changedFiles !== null ? String(changedFiles) : 'N/A'}`
+  ].join('\n');
+
   const embed = new EmbedBuilder()
     .setTitle(clampText(title, 256))
     .setURL(details?.html_url || commit.url)
     .setColor(hashColor(githubUser))
+    .setDescription(body ? clampText(body, 1024) : 'No description provided.')
     .addFields(
-      { name: 'Author', value: clampText(authorDisplay, 1024), inline: true },
-      { name: 'Date', value: formatIsoDate(safeCommitDate), inline: true },
-      { name: 'Branch', value: branch || 'unknown', inline: true },
-      { name: 'Hash', value: commit.id?.substring(0, 8) || 'unknown', inline: true },
-      { name: 'Lines Added', value: added !== null ? String(added) : 'N/A', inline: true },
-      { name: 'Lines Removed', value: removed !== null ? String(removed) : 'N/A', inline: true },
-      { name: 'Files Changed', value: changedFiles !== null ? String(changedFiles) : 'N/A', inline: true },
+      { name: 'Summary', value: clampText(summaryLines, 1024), inline: true },
+      { name: 'Changes', value: clampText(changeLines, 1024), inline: true },
       { name: 'Top Files', value: clampText(topFiles.join('\n') || 'N/A', 1024) }
     )
     .setFooter({ text: payload.repository?.full_name || 'GitHub' })
     .setTimestamp(safeCommitDate);
 
-  if (body) {
-    embed.addFields({ name: 'Message', value: clampText(body, 1024) });
-  }
   if (extras.length) {
-    embed.addFields({ name: 'Commit Info', value: extras.join(', ') });
+    embed.addFields({ name: 'Notes', value: extras.join(' | ') });
   }
 
   if (config.outputChannelId) {
@@ -444,4 +495,3 @@ app.listen(port, () => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
-

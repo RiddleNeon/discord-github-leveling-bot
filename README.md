@@ -12,29 +12,31 @@ Example `.env`:
 
 ```
 DISCORD_TOKEN=your_discord_bot_token
+CLIENT_ID=your_discord_application_id
+GUILD_ID=your_discord_guild_id_optional
 _GITHUB_TOKEN=your_github_token_optional
 _GITHUB_WEBHOOK_SECRET=your_webhook_secret_optional
 PORT=3000
 ```
 
 `_GITHUB_TOKEN` is optional but required for full commit stats (additions, deletions, top files).
+`GUILD_ID` is optional and speeds up slash command registration for a single server.
 
 ## Commands
 
 Admin commands:
 
-- `!setcommitschannel #channel`
-- `!setleaderboardchannel #channel`
-- `!setprefix <newPrefix>`
-- `!addxp @user <amount>`
-- `!debugconfig`
+- `/setcommitschannel #channel`
+- `/setleaderboardchannel #channel`
+- `/addxp @user <amount>`
+- `/debugconfig`
 
 User commands:
 
-- `!linkgithub <githubUsername>`
-- `!unlinkgithub`
-- `!leaderboard`
-- `!help`
+- `/linkgithub <githubUsername>`
+- `/unlinkgithub`
+- `/leaderboard`
+- `/help`
 
 ## GitHub Webhook
 
