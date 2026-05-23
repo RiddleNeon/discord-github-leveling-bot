@@ -85,6 +85,23 @@ function buildLeaderboardComponents() {
   return [new ActionRowBuilder().addComponents(refreshButton, infoButton)];
 }
 
+function isTextChannel(channel) {
+  if (!channel) return false;
+  if (typeof channel.isTextBased === 'function') return channel.isTextBased();
+  return typeof channel.send === 'function';
+}
+
+async function resolveDisplayName(discordClient, channel, userId) {
+  const guild = channel?.guild;
+  if (guild) {
+    const member = await guild.members.fetch(userId).catch(() => null);
+    if (member?.displayName) return member.displayName;
+  }
+
+  const user = await discordClient.users.fetch(userId).catch(() => null);
+  return user?.username || `User ${userId}`;
+}
+
 function getXpToNext(level) {
   return Math.max(50, Math.floor(100 * Math.pow(level, 1.45)));
 }
@@ -247,7 +264,7 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
     const channel = interaction.options.getChannel('channel', true);
-    if (!channel.isTextBased()) {
+    if (!isTextChannel(channel)) {
       await interaction.reply({ content: 'Please choose a text channel.', ephemeral: true });
       return;
     }
@@ -263,7 +280,7 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
     const channel = interaction.options.getChannel('channel', true);
-    if (!channel.isTextBased()) {
+    if (!isTextChannel(channel)) {
       await interaction.reply({ content: 'Please choose a text channel.', ephemeral: true });
       return;
     }
@@ -344,7 +361,7 @@ async function updateLeaderboard(discordClient, currentConfig) {
   const channelId = currentConfig.leaderboardChannelId;
   if (!channelId) return;
   const channel = await discordClient.channels.fetch(channelId).catch(() => null);
-  if (!channel || !channel.isTextBased()) return;
+  if (!channel || !isTextChannel(channel)) return;
 
   const entries = Object.entries(currentConfig.users)
     .map(([id, data]) => ({ id, ...data }))
@@ -491,7 +508,7 @@ async function processCommit(commit, payload, repo, branch) {
 
   if (config.outputChannelId) {
     const channel = await client.channels.fetch(config.outputChannelId).catch(() => null);
-    if (channel && channel.isTextBased()) {
+    if (channel && isTextChannel(channel)) {
       await channel.send({ embeds: [embed] });
     }
   }
