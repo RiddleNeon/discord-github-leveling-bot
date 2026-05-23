@@ -63,7 +63,7 @@ function formatIsoDate(value) {
   return date.toISOString();
 }
 
-function renderProgressBar(current, total, size = 12) {
+function renderProgressBar(current, total, size = 16) {
   const safeTotal = Math.max(1, total || 0);
   const ratio = Math.min(1, Math.max(0, current / safeTotal));
 
@@ -383,16 +383,16 @@ async function updateLeaderboard(discordClient, currentConfig) {
       return { ...entry, displayName, nextXp, bar, percent };
     })
   );
-  
+
   const embed = new EmbedBuilder()
       .setTitle('🏆 Server Leaderboard')
-      .setDescription('Top contributors ranked by XP')
+      .setDescription('\nTop contributors ranked by XP\n\n')
       .setColor(0xf1c40f)
       .setThumbnail(discordClient.user.displayAvatarURL())
       .setFooter({
         text: 'Level System'
       })
-      .setTimestamp(); 
+      .setTimestamp();
 
   if (!resolvedEntries.length) {
     embed.setDescription('No activity yet.');
@@ -413,19 +413,26 @@ async function updateLeaderboard(discordClient, currentConfig) {
             value =
                 [
                   '👑 **CURRENT LEADER** 👑',
+                  `## ${rank}  ${safeName}`,
                   '',
                   `⭐ **Level ${entry.level}**`,
                   '',
                   `${entry.bar}`,
-                  `\`${entry.xp} / ${entry.nextXp} XP\``
+                  `> ${entry.xp} / ${entry.nextXp} XP  •  ${entry.percent}%`,
+                  '',
+                  '───────────────'
                 ].join('\n')
           } else {
             value =
                 [
+                  `## ${rank}  ${safeName}`,
+                  '',
                   `⭐ **Level ${entry.level}**`,
-                  ``,
+                  '',
                   `${entry.bar}`,
-                  `\`${entry.xp} / ${entry.nextXp} XP\` • **${entry.percent}%**`
+                  `> ${entry.xp} / ${entry.nextXp} XP  •  ${entry.percent}%`,
+                  '',
+                  '───────────────'
                 ].join('\n');
           }
 
